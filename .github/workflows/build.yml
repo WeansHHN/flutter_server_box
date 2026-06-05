@@ -1,180 +1,53 @@
-name: Flutter Build
+name: Build iOS IPA
 
 on:
-  workflow_dispatch:
-  push:
-    tags:
-      - "v*"
+workflow_dispatch:
+push:
+tags:
+- "v*"
 
 permissions:
-  contents: write
+contents: write
 
 env:
-  APP_NAME: ServerBox
-  RELEASE_TAG: ${{ github.ref_name }}
-  BUILD_TAG: test-build-${{ github.run_number }}-${{ github.sha }}
+APP_NAME: ServerBox
+RELEASE_TAG: ${{ github.ref_name }}
 
 jobs:
-  buildAndroid:
-    name: Build android
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-      - name: Install Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: "stable"
-          flutter-version: "3.44.1"
-      - uses: actions/setup-java@v4
-        with:
-          distribution: "zulu"
-          java-version: "21"
-      - name: Fetch secrets
-        run: |
-          curl --fail --show-error --location -u ${{ secrets.BASIC_AUTH }} -o android/app/app.key ${{ secrets.URL_PREFIX }}app.key
-          curl --fail --show-error --location -u ${{ secrets.BASIC_AUTH }} -o android/key.properties ${{ secrets.URL_PREFIX }}key.properties
-      - name: Patch JNI build-id
-        run: |
-          flutter pub get
-          scripts/release/patch-jni-build-id.sh
-      - name: Build
-        run: dart run fl_build -p android
-      - name: Rename for release
-        if: github.ref_type == 'tag'
-        shell: bash
-        run: |
-          APK_DIR="build/app/outputs/flutter-apk"
-          shopt -s nullglob
+buildIOS:
+name: Build iOS
+runs-on: macos-latest
 
-          for arch in arm64 arm amd64; do
-            matches=("$APK_DIR"/"${APP_NAME}"_*_"${arch}".apk)
-            if [ ${#matches[@]} -ne 1 ]; then
-              echo "Error: expected 1 APK for ${arch}, found ${#matches[@]}"
-              echo "APK_DIR: $APK_DIR"
-              ls -la "$APK_DIR" || true
-              exit 1
-            fi
-            mv "${matches[0]}" "$APK_DIR/${APP_NAME}_${RELEASE_TAG}_${arch}.apk"
-          done
-      - name: Upload artifacts
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APP_NAME }}-${{ env.BUILD_TAG }}-android
-          path: build/app/outputs/flutter-apk/*.apk
-          if-no-files-found: error
-          retention-days: 14
-      - name: Create Release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            build/app/outputs/flutter-apk/${{ env.APP_NAME }}_${{ env.RELEASE_TAG }}_arm64.apk
-            build/app/outputs/flutter-apk/${{ env.APP_NAME }}_${{ env.RELEASE_TAG }}_arm.apk
-            build/app/outputs/flutter-apk/${{ env.APP_NAME }}_${{ env.RELEASE_TAG }}_amd64.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+steps:
+  - name: Checkout
+    uses: actions/checkout@v6
+    with:
+      submodules: recursive
 
-  buildLinux:
-    name: Build linux
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runs_on: ubuntu-latest
-            release_suffix: ""
-            artifact_suffix: ""
-          - runs_on: ubuntu-22.04
-            release_suffix: "_legacy"
-            artifact_suffix: "-legacy"
-    runs-on: ${{ matrix.runs_on }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-      - name: Install Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y clang cmake ninja-build pkg-config libgtk-3-dev mesa-utils libvulkan-dev desktop-file-utils wget
-          sudo apt install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libunwind-dev libsecret-1-dev
-      - name: Build
-        run: dart run fl_build -p linux
-      - name: Rename for release
-        if: github.ref_type == 'tag'
-        shell: bash
-        run: |
-          shopt -s nullglob
-          matches=("${APP_NAME}"_*_amd64.AppImage)
-          if [ ${#matches[@]} -ne 1 ]; then
-            echo "Error: expected 1 AppImage, found ${#matches[@]}"
-            ls -la || true
-            exit 1
-          fi
-          mv "${matches[0]}" "${APP_NAME}_${RELEASE_TAG}${{ matrix.release_suffix }}_amd64.AppImage"
-      - name: Upload artifacts
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APP_NAME }}-${{ env.BUILD_TAG }}-linux${{ matrix.artifact_suffix }}
-          path: "*.AppImage"
-          if-no-files-found: error
-          retention-days: 14
-      - name: Create Release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ env.APP_NAME }}_${{ env.RELEASE_TAG }}${{ matrix.release_suffix }}_amd64.AppImage
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  - name: Install Flutter
+    uses: subosito/flutter-action@v2
+    with:
+      channel: stable
 
-  buildWindows:
-    name: Build windows
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          submodules: recursive
-      - name: Install Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-      - name: Build
-        run: dart run fl_build -p windows
-      - name: Rename for release
-        if: github.ref_type == 'tag'
-        shell: bash
-        run: |
-          shopt -s nullglob
-          matches=("${APP_NAME}"_*_windows_amd64.zip)
-          if [ ${#matches[@]} -ne 1 ]; then
-            echo "Error: expected 1 zip, found ${#matches[@]}"
-            ls -la || true
-            exit 1
-          fi
-          mv "${matches[0]}" "${APP_NAME}_${RELEASE_TAG}_windows_amd64.zip"
-      - name: Upload artifacts
-        if: github.ref_type != 'tag'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.APP_NAME }}-${{ env.BUILD_TAG }}-windows
-          path: "*_windows_amd64.zip"
-          if-no-files-found: error
-          retention-days: 14
-      - name: Create Release
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            ${{ env.APP_NAME }}_${{ env.RELEASE_TAG }}_windows_amd64.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  - name: Flutter Pub Get
+    run: flutter pub get
+
+  - name: Build iOS
+    run: |
+      flutter build ipa --release --no-codesign
+
+  - name: Upload Artifact
+    uses: actions/upload-artifact@v4
+    with:
+      name: ServerBox-IPA
+      path: build/ios/ipa/*.ipa
+
+  - name: Create Release
+    if: github.ref_type == 'tag'
+    uses: softprops/action-gh-release@v2
+    with:
+      files: build/ios/ipa/*.ipa
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
